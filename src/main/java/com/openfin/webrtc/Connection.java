@@ -143,17 +143,17 @@ public class Connection implements PeerConnectionObserver {
 
     @Override
     public void onIceConnectionChange(RTCIceConnectionState state) {
-
+        logger.debug("onIceConnectionChange {}", state.toString());
     }
 
     @Override
     public void onStandardizedIceConnectionChange(RTCIceConnectionState state) {
-
+        logger.debug("onStandardizedIceConnectionChange {}", state.toString());
     }
 
     @Override
     public void onIceConnectionReceivingChange(boolean receiving) {
-
+        logger.debug("onIceConnectionReceivingChange {}", receiving);
     }
 
     @Override
@@ -171,12 +171,13 @@ public class Connection implements PeerConnectionObserver {
 
     @Override
     public void onIceCandidateError(RTCPeerConnectionIceErrorEvent event) {
+        logger.debug("onIceCandidateError {} {}", event.getAddress(), event.getErrorText());
 
     }
 
     @Override
     public void onIceCandidatesRemoved(RTCIceCandidate[] candidates) {
-
+        logger.debug("onIceCandidatesRemoved");
     }
 
     @Override

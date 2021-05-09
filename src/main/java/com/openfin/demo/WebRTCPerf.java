@@ -11,7 +11,10 @@ import org.slf4j.LoggerFactory;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.concurrent.CountDownLatch;
+import java.util.logging.SimpleFormatter;
 
 public class WebRTCPerf implements DesktopStateListener, ConnectionListener {
     private final static Logger logger = LoggerFactory.getLogger(WebRTCPerf.class);
@@ -20,18 +23,25 @@ public class WebRTCPerf implements DesktopStateListener, ConnectionListener {
     private static final CountDownLatch latch = new CountDownLatch(1);
     private Connection webRTCConnection;
     private Channel channel;
+    private ChannelListener channelListener;
+    private static String PERFORMANCE_CHANNEL_NAME = "WebRTCPerfChannel";
+    private JSONObject sampleMessage;
+    private SimpleDateFormat dateFormat = new SimpleDateFormat("HH:mm:ss.SSS");
+
     private JFrame demoWindow;
     private JPanel glassPane;
 
-    private Timer timer;
+    private Timer statTimer, sendTimer;
     private JTextField tfMSize;
     private JTextField tfMPS;
     private JTextField tfTotalCount;
+    private JButton btnStart;
+
     // performance Metrics
-    private volatile long currentMessageId = 0;
-    private volatile int lastMPS = 0;
-    private volatile  long currentStartTime = 0;
-    private volatile int currentCount = 0;
+    private long currentMessageId = 0;
+    private int lastMPS = 0;
+    private long currentStartTime = 0;
+    private int currentCount = 0;
 
     public WebRTCPerf() throws Exception {
         this.demoWindow = new JFrame("OpenFin WebRTC Performance test");
@@ -46,16 +56,34 @@ public class WebRTCPerf implements DesktopStateListener, ConnectionListener {
         String desktopVersion = java.lang.System.getProperty("com.openfin.demo.runtime.version", "stable");
         RuntimeConfiguration configuration = new RuntimeConfiguration();
         configuration.setRuntimeVersion(desktopVersion);
-        desktopConnection.connect(configuration, this, 60);
+        this.channelListener = new ChannelListener() {
+            @Override
+            public void onStateChange(State state) {
+                logger.info("New Channel State {}", state.toString());
+            }
+            @Override
+            public void onMessage(String message) {
+                WebRTCPerf.this.onPerfData(message);
+            }
+        };
 
-        this.timer = new Timer(1000, new AbstractAction() {
+        this.statTimer = new Timer(1000, new AbstractAction() {
             @Override
             public void actionPerformed(ActionEvent e) {
                 WebRTCPerf.this.updateMetrics();
             }
         });
-        this.timer.setInitialDelay(0);
-        this.timer.start();
+        this.statTimer.setInitialDelay(0);
+
+        this.sendTimer = new Timer(1000, new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                WebRTCPerf.this.spam();
+            }
+        });
+        this.sendTimer.setInitialDelay(0);
+
+        desktopConnection.connect(configuration, this, 60);
     }
 
     private JPanel createGlassPane() {
@@ -81,7 +109,6 @@ public class WebRTCPerf implements DesktopStateListener, ConnectionListener {
         this.tfMSize = new JTextField("1024");
         this.tfMPS = new JTextField("500");
         this.tfTotalCount = new JTextField("");
-        tfTotalCount.setEnabled(false);
         JPanel pnlCenter = new JPanel(new GridBagLayout());
         GridBagConstraints gbConst = new GridBagConstraints();
         gbConst.gridx = 0;
@@ -108,8 +135,13 @@ public class WebRTCPerf implements DesktopStateListener, ConnectionListener {
         gbConst.gridy++;
         pnlCenter.add(new JLabel(), gbConst);
 
-
-        JButton btnStart = new JButton("Start");
+        this.btnStart = new JButton("Start");
+        this.btnStart.addActionListener(new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                WebRTCPerf.this.toggleSend();
+            }
+        });
 
         JPanel pnlBottom = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         pnlBottom.add(btnStart);
@@ -124,6 +156,57 @@ public class WebRTCPerf implements DesktopStateListener, ConnectionListener {
             this.tfTotalCount.setText(String.format("%d", this.currentMessageId));
         }
     }
+
+    private void toggleSend() {
+        if (this.sendTimer.isRunning()) {
+            this.sendTimer.stop();
+            this.btnStart.setText("Start");
+//            this.channel.removeChannelListener(this.channelListener);
+//            this.channel.close();
+//            this.channel = null;
+        } else {
+            this.btnStart.setText("Stop");
+            if (this.channel == null) {
+                this.channel = this.webRTCConnection.createChannel(PERFORMANCE_CHANNEL_NAME);
+                this.channel.addChannelListener(this.channelListener);
+            }
+            this.currentMessageId = 0;
+            this.currentStartTime = 0;
+            this.currentCount = 0;
+            this.sampleMessage = new JSONObject();
+            int len = Integer.parseInt(this.tfMSize.getText());
+            String payload = String.format("%0" + len + "d", 8);
+            this.sampleMessage.put("payload", payload);
+            this.sendTimer.restart();
+            this.statTimer.stop();
+            logger.info("Starting with MSP {} msg size {}", Integer.parseInt(this.tfMPS.getText()), payload.length());
+        }
+    }
+
+    private void spam() {
+        long start = System.currentTimeMillis();
+        for (int i = 0; i < Integer.parseInt(this.tfMPS.getText()); i++) {
+            this.currentMessageId += 1;
+            this.sampleMessage.put("id", this.currentMessageId);
+            try {
+                this.channel.send(this.sampleMessage.toString());
+            } catch (Exception ex) {
+                logger.error("Error sending", ex);
+                this.toggleSend();
+            }
+//            if (dataChannelRef.current.bufferedAmount >= threshold) {
+//                setInfoText(`throttling ${dataChannelRef.current.bufferedAmount}`);
+//                console.log(`throttling ${dataChannelRef.current.bufferedAmount}`);
+//                toggleSend();
+//                break;
+//            }
+        }
+        this.tfTotalCount.setText(String.format("%d", this.currentMessageId));
+        logger.info("{} {} {}", dateFormat.format(new Date()), this.currentMessageId, (System.currentTimeMillis() - start) );
+        int elapse = (int) (System.currentTimeMillis() - start - 1000);
+        sendTimer.setDelay( elapse > 0 ? elapse : 0  );
+    }
+
     @Override
     public void onReady() {
         logger.info("onReady");
@@ -166,7 +249,6 @@ public class WebRTCPerf implements DesktopStateListener, ConnectionListener {
     public static void main(String[] args) throws Exception {
         new WebRTCPerf();
         latch.await();
-
     }
 
     @Override
@@ -177,17 +259,10 @@ public class WebRTCPerf implements DesktopStateListener, ConnectionListener {
     @Override
     public void onChannel(Channel channel) {
         logger.info("new Channel {}", channel.getName());
-        this.channel = channel;
-        this.channel.addChannelListener(new ChannelListener() {
-            @Override
-            public void onStateChange(State state) {
-                logger.info("New Channel State {}", state.toString());
-            }
-            @Override
-            public void onMessage(String message) {
-                WebRTCPerf.this.onPerfData(message);
-            }
-        });
+        if (this.channel.getName().equals(PERFORMANCE_CHANNEL_NAME)) {
+            this.channel = channel;
+            this.channel.addChannelListener(this.channelListener);
+        }
     }
 
     private void onPerfData(String s) {
@@ -207,6 +282,9 @@ public class WebRTCPerf implements DesktopStateListener, ConnectionListener {
             this.lastMPS = this.currentCount;
             this.currentCount = 0;
             this.currentStartTime = now;
+        }
+        if (!this.statTimer.isRunning()) {
+            this.statTimer.start();
         }
     }
 }

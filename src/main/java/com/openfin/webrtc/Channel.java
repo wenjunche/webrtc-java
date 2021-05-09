@@ -61,8 +61,19 @@ public class Channel implements RTCDataChannelObserver {
         return null;
     }
 
+    public void send(String s) throws Exception {
+        ByteBuffer data = ByteBuffer.wrap(s.getBytes(StandardCharsets.UTF_8));
+        RTCDataChannelBuffer buffer = new RTCDataChannelBuffer(data, false);
+        this.dataChannel.send(buffer);
+    }
+
+    public void close() {
+        this.dataChannel.close();
+    }
+
     @Override
     public void onBufferedAmountChange(long previousAmount) {
+        logger.debug("onBufferedAmountChange {}", previousAmount);
     }
 
     @Override
