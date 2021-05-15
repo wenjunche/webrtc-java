@@ -1,3 +1,6 @@
+/**
+ * WebRTC Connection that uses OpenFin channel API, instead of ICE Servers, to initiate connectivity.
+ */
 package com.openfin.webrtc;
 
 import com.openfin.desktop.AsyncCallback;
@@ -35,10 +38,9 @@ public class LocalConnection extends Connection {
     }
 
     @Override
-    protected JSONObject makeOffer() throws Exception {
-        var offer = super.makeOffer();
+    protected void makeOffer() throws Exception {
+        var offer = this.createOfferPayload();
         this.ofChannelClient.dispatch(OFFER_ACTION, offer, null);
-        return offer;
     }
 
     @Override

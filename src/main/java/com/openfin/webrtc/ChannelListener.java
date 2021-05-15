@@ -1,3 +1,6 @@
+/**
+ * Listener for channel events
+ */
 package com.openfin.webrtc;
 
 public interface ChannelListener {

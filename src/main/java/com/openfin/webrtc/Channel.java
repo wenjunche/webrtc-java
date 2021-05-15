@@ -1,3 +1,7 @@
+/**
+ * a Channel backed by WebRTC data channel
+ */
+
 package com.openfin.webrtc;
 
 import dev.onvoid.webrtc.RTCDataChannel;

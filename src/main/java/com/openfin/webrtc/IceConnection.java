@@ -1,10 +1,12 @@
+/**
+ * WebRTC Connection that requires ICE Servers to initiate connectivity.
+ */
+
 package com.openfin.webrtc;
 
-import dev.onvoid.webrtc.RTCConfiguration;
 import dev.onvoid.webrtc.RTCIceCandidate;
 import dev.onvoid.webrtc.RTCSdpType;
 import dev.onvoid.webrtc.RTCSessionDescription;
-import io.socket.client.Socket;
 import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,10 +43,9 @@ public class IceConnection extends Connection implements SignalingListener {
     }
 
     @Override
-    protected JSONObject makeOffer() throws Exception {
-        var offer = super.makeOffer();
+    protected void makeOffer() throws Exception {
+        var offer = this.createOfferPayload();
         this.signaling.emit("message", offer.getJSONObject("description"));
-        return offer;
     }
 
     @Override

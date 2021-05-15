@@ -1,3 +1,6 @@
+/**
+ * Configuration for creating WebRTC connections
+ */
 package com.openfin.webrtc;
 
 import com.openfin.desktop.DesktopConnection;

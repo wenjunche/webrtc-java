@@ -1,3 +1,6 @@
+/**
+ * Abstract class for WebRTC Connection
+ */
 package com.openfin.webrtc;
 
 import dev.onvoid.webrtc.*;
@@ -16,7 +19,7 @@ import java.util.concurrent.CountDownLatch;
 
 import static java.util.Objects.nonNull;
 
-public class Connection implements PeerConnectionObserver {
+public abstract class Connection implements PeerConnectionObserver {
     private final static Logger logger = LoggerFactory.getLogger(Connection.class);
     private final CountDownLatch connectedLatch;
 
@@ -43,8 +46,7 @@ public class Connection implements PeerConnectionObserver {
         logger.debug("Created Connection with default channel {}", this.defaultChannelName);
     }
 
-    public void initialize() throws Exception {
-    }
+    abstract public void initialize() throws Exception;
 
     protected void createPeerConnection(JSONObject rtcConfig) {
         RTCConfiguration config = createRTCConfig(rtcConfig);
@@ -54,7 +56,6 @@ public class Connection implements PeerConnectionObserver {
     private RTCConfiguration createRTCConfig(JSONObject rtcConfig) {
         RTCConfiguration config = new RTCConfiguration();
         if (nonNull(rtcConfig)) {
-            List<RTCIceServer> iceServers = new ArrayList<>();
             JSONArray array = rtcConfig.getJSONArray("iceServers");
             for (int i = 0; i < array.length(); i++) {
                 RTCIceServer iceServer = new RTCIceServer();
@@ -67,27 +68,36 @@ public class Connection implements PeerConnectionObserver {
                 } else {
                     iceServer.urls.add(iceJson.optString("urls"));
                 }
+                config.iceServers.add(iceServer);
                 logger.debug("adding ice server: {}", iceServer);
             }
         }
         return config;
     }
 
+    /**
+     * Initializes offer-answer flow.  Only one party of the peer-peer should call this
+     * @throws Exception
+     */
     public void initializeOffer() throws Exception {
         logger.debug("Initialize offer {}", this.configuration.getPairingCode());
         this.createDefaultChannel();
         this.createOffer();
     }
 
-    public void initializeAnswer() throws Exception {
-        logger.debug("Initialize answer {}", this.configuration.getPairingCode());
-    }
-
+    /**
+     *  need to create a data channel to trigger Trickle ICE process
+     */
     private void createDefaultChannel() {
         var defaultDataChannel = this.peerConnection.createDataChannel(this.defaultChannelName, new RTCDataChannelInit());
         this.defaultChannel = new Channel(defaultDataChannel);
     }
 
+    /**
+     * set local description to OFFER
+     *
+     * @throws Exception
+     */
     private void createOffer() throws Exception {
         CreateDescObserver createObserver = new CreateDescObserver();
         SetDescObserver setObserver = new SetDescObserver();
@@ -97,7 +107,14 @@ public class Connection implements PeerConnectionObserver {
         setObserver.get();
     }
 
-    protected JSONObject makeOffer() throws Exception {
+    /**
+     * Send OFFER to the other peer
+     *
+     * @throws Exception
+     */
+    protected abstract void makeOffer() throws Exception;
+
+    protected JSONObject createOfferPayload() {
         var offer = this.peerConnection.getLocalDescription();
         JSONObject description = new JSONObject();
         description.put("type", SDPOffer);
@@ -108,6 +125,11 @@ public class Connection implements PeerConnectionObserver {
         return payload;
     }
 
+    /**
+     * set local description to ANSWER
+     *
+     * @throws Exception
+     */
     protected RTCSessionDescription createAnswer() throws Exception {
         CreateDescObserver createObserver = new CreateDescObserver();
         SetDescObserver setObserver = new SetDescObserver();
@@ -118,6 +140,11 @@ public class Connection implements PeerConnectionObserver {
         return answerDesc;
     }
 
+    /**
+     * Process ANSWER from the peer
+     * @param payload
+     * @return
+     */
     protected JSONObject onAnswer(JSONObject payload) {
         logger.debug("Got answer {}", payload.toString());
         JSONObject ret = new JSONObject();
@@ -132,6 +159,11 @@ public class Connection implements PeerConnectionObserver {
         return ret;
     }
 
+    /**
+     * Porcess OFFER from the peer
+     * @param payload
+     * @return
+     */
     protected JSONObject onOffer(JSONObject payload) {
         return null;
     }
@@ -142,6 +174,11 @@ public class Connection implements PeerConnectionObserver {
         setObserver.get();
     }
 
+    /**
+     * Trickle ICE
+     *
+     * @param payload
+     */
     public void addIceCandidate(JSONObject payload) {
         RTCIceCandidate candidate = new RTCIceCandidate(payload.getString("sdpMid"),
                 payload.getInt("sdpMLineIndex"),
