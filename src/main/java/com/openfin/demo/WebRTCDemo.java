@@ -1,246 +1,209 @@
 package com.openfin.demo;
 
+import com.openfin.desktop.DesktopConnection;
+import com.openfin.desktop.DesktopStateListener;
+import com.openfin.desktop.RuntimeConfiguration;
+import com.openfin.webrtc.*;
 import org.json.JSONObject;
-import com.openfin.webrtc.CreateDescObserver;
-import com.openfin.webrtc.SetDescObserver;
-import dev.onvoid.webrtc.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
-import java.util.Scanner;
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.concurrent.CountDownLatch;
 
-import static java.util.Objects.nonNull;
+public class WebRTCDemo implements DesktopStateListener, ConnectionListener {
+    private final static Logger logger = LoggerFactory.getLogger(WebRTCDemo.class);
 
-public class WebRTCDemo implements PeerConnectionObserver {
-    protected PeerConnectionFactory factory;
-    private RTCPeerConnection localPeerConnection;
-    private RTCPeerConnection remotePeerConnection;
-    private RTCDataChannel localDataChannel;
-    private RTCDataChannel remoteDataChannel;
+    private final DesktopConnection desktopConnection;
+    private static final CountDownLatch latch = new CountDownLatch(1);
+    private Connection webRTCConnection;
+    private Channel channel;
+    private final ChannelListener channelListener;
 
-    private CountDownLatch connectedLatch;
+    private JFrame demoWindow;
+    private JPanel glassPane;
 
-    public WebRTCDemo(PeerConnectionFactory factory) {
-        this.factory = factory;
-        RTCConfiguration config = new RTCConfiguration();
-        localPeerConnection = factory.createPeerConnection(config, this);
-        localDataChannel = localPeerConnection.createDataChannel("chat", new RTCDataChannelInit());
-        localDataChannel.registerObserver(new RTCDataChannelObserver() {
+    private JTextField tfChannelName;
+    private JTextField tfOutgoingText;
+    private JTextField tfIncomingText;
+    private JButton btnSend;
+
+    public WebRTCDemo() throws Exception {
+        this.demoWindow = new JFrame("OpenFin WebRTC Demo");
+        this.demoWindow.setContentPane(this.createContentPanel());
+        this.demoWindow.setGlassPane(this.createGlassPane());
+        this.demoWindow.pack();
+        this.demoWindow.setLocationRelativeTo(null);
+        this.demoWindow.setVisible(true);
+        this.glassPane.setVisible(true);
+
+        desktopConnection = new DesktopConnection(WebRTCDemo.class.getName());
+        String desktopVersion = java.lang.System.getProperty("com.openfin.demo.runtime.version", "stable");
+        RuntimeConfiguration configuration = new RuntimeConfiguration();
+        configuration.setRuntimeVersion(desktopVersion);
+        this.channelListener = new ChannelListener() {
             @Override
-            public void onBufferedAmountChange(long previousAmount) { }
-
-            @Override
-            public void onStateChange() {
-                System.out.println(String.format("onStateChange %s %s", localDataChannel.getLabel(), localDataChannel.getState()));
-                if (localDataChannel.getState() == RTCDataChannelState.OPEN) {
-                    try {
-                        WebRTCDemo.this.sendTextMessage("Hello Java");
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-                }
+            public void onStateChange(State state) {
+                logger.info("New Channel State {}", state.toString());
             }
-
             @Override
-            public void onMessage(RTCDataChannelBuffer buffer) {
-                try {
-                    decodeMessage(buffer);
-                }
-                catch (Exception e) {
-                    e.printStackTrace();
-                }
+            public void onMessage(String message) {
+                WebRTCDemo.this.tfIncomingText.setText(message);
             }
-        });
-        connectedLatch = new CountDownLatch(1);
+        };
+
+        desktopConnection.connect(configuration, this, 60);
     }
 
-    public void setRemotePeerConnection(RTCPeerConnection remotePeerConnection) {
-        this.remotePeerConnection = remotePeerConnection;
+    private JPanel createGlassPane() {
+        this.glassPane = new JPanel(new BorderLayout());
+        JLabel l = new JLabel("Loading, please wait......");
+        l.setHorizontalAlignment(JLabel.CENTER);
+        this.glassPane.add(l, BorderLayout.CENTER);
+        this.glassPane.setBackground(Color.LIGHT_GRAY);
+        return this.glassPane;
     }
 
-    RTCSessionDescription createOffer() throws Exception {
-        CreateDescObserver createObserver = new CreateDescObserver();
-        SetDescObserver setObserver = new SetDescObserver();
-
-        localPeerConnection.createOffer(new RTCOfferOptions(), createObserver);
-
-        RTCSessionDescription offerDesc = createObserver.get();
-
-        localPeerConnection.setLocalDescription(offerDesc, setObserver);
-        setObserver.get();
-
-        return offerDesc;
+    private JPanel createContentPanel() {
+        JPanel p = new JPanel(new BorderLayout());
+        p.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        p.setPreferredSize(new Dimension(550, 200));
+        p.add(this.createPerfPanel(), BorderLayout.CENTER);
+        return p;
     }
 
-    RTCSessionDescription createAnswer() throws Exception {
-        CreateDescObserver createObserver = new CreateDescObserver();
-        SetDescObserver setObserver = new SetDescObserver();
+    private JPanel createPerfPanel() {
+        JPanel pnl = new JPanel(new BorderLayout());
+        pnl.setBorder(BorderFactory.createTitledBorder("WebRTC Channel"));
+        this.tfChannelName = new JTextField("JavaWebRTC");
+        this.tfOutgoingText = new JTextField("");
+        this.tfIncomingText = new JTextField("");
+        JPanel pnlCenter = new JPanel(new GridBagLayout());
+        GridBagConstraints gbConst = new GridBagConstraints();
+        gbConst.gridx = 0;
+        gbConst.gridy = 0;
+        gbConst.weightx = 0;
+        gbConst.insets = new Insets(5, 5, 5, 5);
+        gbConst.anchor = GridBagConstraints.EAST;
+        pnlCenter.add(new JLabel("Channel Name"), gbConst);
+        gbConst.gridy++;
+        pnlCenter.add(new JLabel("Outgoing Text"), gbConst);
+        gbConst.gridy++;
+        pnlCenter.add(new JLabel("Incoming Text"), gbConst);
+        gbConst.gridy++;
+        gbConst.gridx = 1;
+        gbConst.gridy = 0;
+        gbConst.weightx = 0.5;
+        gbConst.insets = new Insets(5, 0, 5, 5);
+        gbConst.fill = GridBagConstraints.BOTH;
+        pnlCenter.add(tfChannelName, gbConst);
+        gbConst.gridy++;
+        pnlCenter.add(tfOutgoingText, gbConst);
+        gbConst.gridy++;
+        pnlCenter.add(tfIncomingText, gbConst);
+        gbConst.gridy++;
+        pnlCenter.add(new JLabel(), gbConst);
 
-        localPeerConnection.createAnswer(new RTCAnswerOptions(), createObserver);
-
-        RTCSessionDescription answerDesc = createObserver.get();
-
-        localPeerConnection.setLocalDescription(answerDesc, setObserver);
-        setObserver.get();
-
-        return answerDesc;
-    }
-
-    void setRemoteDescription(RTCSessionDescription description) throws Exception {
-        SetDescObserver setObserver = new SetDescObserver();
-        localPeerConnection.setRemoteDescription(description, setObserver);
-        setObserver.get();
-    }
-
-    @Override
-    public void onConnectionChange(RTCPeerConnectionState state) {
-        System.out.println(String.format("onConnectionChange %s", state));
-        if (state == RTCPeerConnectionState.CONNECTED) {
-            connectedLatch.countDown();
-        }
-    }
-
-    void waitUntilConnected() throws InterruptedException {
-        connectedLatch.await();
-    }
-
-    void sendTextMessage(String message) throws Exception {
-        ByteBuffer data = ByteBuffer.wrap(message.getBytes(StandardCharsets.UTF_8));
-        RTCDataChannelBuffer buffer = new RTCDataChannelBuffer(data, false);
-
-        localDataChannel.send(buffer);
-    }
-
-    void close() {
-        if (nonNull(localDataChannel)) {
-            localDataChannel.unregisterObserver();
-            localDataChannel.close();
-            localDataChannel.dispose();
-            localDataChannel = null;
-        }
-        if (nonNull(remoteDataChannel)) {
-            remoteDataChannel.unregisterObserver();
-            remoteDataChannel.close();
-            remoteDataChannel.dispose();
-            remoteDataChannel = null;
-        }
-        if (nonNull(localPeerConnection)) {
-            localPeerConnection.close();
-            localPeerConnection = null;
-        }
-    }
-
-    @Override
-    public void onIceCandidate(RTCIceCandidate candidate) {
-        System.out.println(candidate.toString());
-        if (nonNull(this.remotePeerConnection)) {
-//            remotePeerConnection.addIceCandidate(candidate);
-        }
-    }
-
-    @Override
-    public void onIceGatheringChange(RTCIceGatheringState state) {
-        System.out.println(String.format("onIceGatheringChange %s", state));
-        if (state == RTCIceGatheringState.COMPLETE) {
-            var offer = this.localPeerConnection.getLocalDescription();
-            JSONObject offerPayload = new JSONObject();
-            offerPayload.put("type", "offer");
-            offerPayload.put("sdp", offer.sdp);
-            System.out.println(offerPayload.toString());
-        }
-    }
-
-    @Override
-    public void onDataChannel(RTCDataChannel dataChannel) {
-        System.out.println(String.format("onDataChannel ", dataChannel.getLabel()));
-        remoteDataChannel = dataChannel;
-        remoteDataChannel.registerObserver(new RTCDataChannelObserver() {
-
+        this.btnSend = new JButton("Send");
+        this.btnSend.setEnabled(false);
+        this.btnSend.addActionListener(new AbstractAction() {
             @Override
-            public void onBufferedAmountChange(long previousAmount) { }
-
-            @Override
-            public void onStateChange() { }
-
-            @Override
-            public void onMessage(RTCDataChannelBuffer buffer) {
-                try {
-                    decodeMessage(buffer);
-                }
-                catch (Exception e) {
-                    e.printStackTrace();
-                }
+            public void actionPerformed(ActionEvent e) {
+                WebRTCDemo.this.sendChat();
             }
         });
+
+        JPanel pnlBottom = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        pnlBottom.add(btnSend);
+        pnl.add(pnlCenter, BorderLayout.CENTER);
+        pnl.add(pnlBottom, BorderLayout.SOUTH);
+        return pnl;
     }
 
-    private void decodeMessage(RTCDataChannelBuffer buffer) {
-        ByteBuffer byteBuffer = buffer.data;
-        byte[] payload;
-
-        if (byteBuffer.hasArray()) {
-            payload = byteBuffer.array();
+    private void sendChat() {
+        try {
+            if (this.channel == null) {
+                this.channel = this.webRTCConnection.createChannel(this.tfChannelName.getText());
+                this.channel.addChannelListener(this.channelListener);
+            }
+            JSONObject chat = new JSONObject();
+            chat.put("type", "chat");
+            chat.put("text", this.tfOutgoingText.getText());
+            this.channel.send(chat.toString());
+        } catch (Exception ex) {
+            logger.error("Error sending text", ex);
         }
-        else {
-            payload = new byte[byteBuffer.limit()];
+    }
 
-            byteBuffer.get(payload);
+    @Override
+    public void onReady() {
+        logger.info("onReady");
+        Configuration cfg = new Configuration();
+        cfg.setPairingCode("JavaWebRTCDemo");
+        cfg.setSignalingBaseUrl("https://webrtc-signaling-dev.openfin.co");
+        var discovery = System.getProperty("com.openfin.demo.webrtc.discovery");
+        if (!"signaling".equals(discovery)) {
+            cfg.setDesktopConnection(this.desktopConnection);
         }
+        try {
+            ConnectionFactory factory = new ConnectionFactory();
+            this.webRTCConnection = factory.createConnection(cfg);
+            this.webRTCConnection.addConnectionListener(this);
 
-        String text = new String(payload, StandardCharsets.UTF_8);
-        System.out.println(text);
+            SwingUtilities.invokeLater(()->{
+                glassPane.setVisible(false);
+            });
+        } catch (Exception ex) {
+            logger.error("Error creating connection", ex);
+        }
+    }
+
+    @Override
+    public void onClose(String s) {
+        logger.info("onClose, value={}", s);
+        latch.countDown();
+    }
+
+    @Override
+    public void onError(String error) {
+        logger.info("onError, value={}", error);
+        latch.countDown();
+    }
+
+    @Override
+    public void onMessage(String s) {
+        logger.info("onMessage {}", s);
+    }
+
+    @Override
+    public void onOutgoingMessage(String s) {
     }
 
     public static void main(String[] args) throws Exception {
-        Scanner sc = new Scanner(System.in);
-
-        var factory = new PeerConnectionFactory();
-        WebRTCDemo caller1 = new WebRTCDemo(factory);
-
-        var offer = caller1.createOffer();
-        JSONObject offerPayload = new JSONObject();
-        offerPayload.put("type", "offer");
-        offerPayload.put("sdp", offer.sdp);
-        System.out.println(offerPayload.toString());
-
-//        JSONObject candidatePayload = (JSONObject) jsonParser.parse(sc.nextLine());
-//        caller1.localPeerConnection.addIceCandidate(new RTCIceCandidate(
-//                (String)candidatePayload.get("sdpMid"),
-//                ((Long) candidatePayload.get("sdpMLineIndex")).intValue(), (String) candidatePayload.get("candidate")));
-
-        JSONObject answerPayload = new JSONObject(sc.nextLine());
-        String sdp = (String) answerPayload.get("sdp");
-        caller1.setRemoteDescription(new RTCSessionDescription(RTCSdpType.ANSWER, sdp));
-
-        caller1.waitUntilConnected();
-
-        Thread.sleep(50000);
-
-        caller1.close();
+        new WebRTCDemo();
+        latch.await();
     }
 
-    public static void main2(String[] args) throws Exception {
-        var factory = new PeerConnectionFactory();
-        WebRTCDemo caller1 = new WebRTCDemo(factory);
-        WebRTCDemo caller2 = new WebRTCDemo(factory);
+    @Override
+    public void onStateChange(ConnectionListener.State state) {
+        logger.info("new Connection state {}", state.toString());
+        if (state == State.OPEN) {
+            this.btnSend.setEnabled(true);
+        } else {
+            this.btnSend.setEnabled(false);
+        }
+    }
 
-        caller1.setRemotePeerConnection(caller2.localPeerConnection);
-        caller2.setRemotePeerConnection(caller1.localPeerConnection);
-
-        caller1.setRemoteDescription(caller2.createOffer());
-        caller2.setRemoteDescription(caller1.createAnswer());
-
-        caller1.waitUntilConnected();
-        caller2.waitUntilConnected();
-
-        caller1.sendTextMessage("Hello world");
-        caller2.sendTextMessage("Hi :)");
-
-        Thread.sleep(50000);
-
-        caller1.close();
-        caller2.close();
+    @Override
+    public void onChannel(Channel channel) {
+        logger.info("new Channel {}", channel.getName());
+        this.channel = channel;
+        this.tfChannelName.setText(channel.getName());
+        this.channel.addChannelListener(this.channelListener);
     }
 
 }

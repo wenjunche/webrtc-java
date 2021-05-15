@@ -68,7 +68,14 @@ public class Channel implements RTCDataChannelObserver {
     }
 
     public void close() {
-        this.dataChannel.close();
+        if (nonNull(this.dataChannel)) {
+            logger.debug("Closing channel {}", getName());
+            this.dataChannel.close();
+            this.dataChannel.unregisterObserver();
+            this.dataChannel.close();
+            this.dataChannel.dispose();
+            this.dataChannel = null;
+        }
     }
 
     @Override
@@ -78,7 +85,7 @@ public class Channel implements RTCDataChannelObserver {
 
     @Override
     public void onStateChange() {
-        logger.debug("onStateChange {}", this.dataChannel.getState().toString());
+        logger.debug("onStateChange {} {}", this.getName(), this.dataChannel.getState().toString());
         this.fireChannelStatusEvent();
     }
 

@@ -14,7 +14,6 @@ import java.awt.event.ActionEvent;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.concurrent.CountDownLatch;
-import java.util.logging.SimpleFormatter;
 
 public class WebRTCPerf implements DesktopStateListener, ConnectionListener {
     private final static Logger logger = LoggerFactory.getLogger(WebRTCPerf.class);
@@ -212,9 +211,12 @@ public class WebRTCPerf implements DesktopStateListener, ConnectionListener {
         logger.info("onReady");
         Configuration cfg = new Configuration();
         cfg.setPairingCode("fastBus");
+        cfg.setDesktopConnection(this.desktopConnection);
         try {
-            this.webRTCConnection = new Connection(cfg, this.desktopConnection);
+            ConnectionFactory factory = new ConnectionFactory();
+            this.webRTCConnection = factory.createConnection(cfg);
             this.webRTCConnection.addConnectionListener(this);
+
             this.webRTCConnection.initializeOffer();
 
             SwingUtilities.invokeLater(()->{

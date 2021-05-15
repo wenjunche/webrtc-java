@@ -1,15 +1,14 @@
 package com.openfin.webrtc;
 
-import com.openfin.desktop.AsyncCallback;
-import com.openfin.desktop.DesktopConnection;
-import com.openfin.desktop.channel.ChannelAction;
-import com.openfin.desktop.channel.ChannelClient;
 import dev.onvoid.webrtc.*;
 import dev.onvoid.webrtc.media.MediaStream;
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -21,38 +20,72 @@ public class Connection implements PeerConnectionObserver {
     private final static Logger logger = LoggerFactory.getLogger(Connection.class);
     private final CountDownLatch connectedLatch;
 
-    private final Configuration configuration;
+    public static final String SDPAnswer = "answer";
+    public static final String SDPOffer = "offer";
+    public static final String SDPCandidate = "candidate";
+
+    protected final Configuration configuration;
     private final PeerConnectionFactory factory;
-    private RTCPeerConnection peerConnection;
-    private RTCDataChannel defaultDataChannel;
+    protected RTCPeerConnection peerConnection;
+    private Channel defaultChannel;
     private String defaultChannelName;  // name of default DataChannel
     private Map<String, Channel> channelMap;
 
-    private final DesktopConnection desktopConnection;
-    private final String ofChannelName;
-    private ChannelClient ofChannelClient;
-    private static final String OFFER_ACTION  = "offer-description";
-    private static final String ANSWER_ACTION = "answer-description";
     private CopyOnWriteArrayList<ConnectionListener> connectionListeners;
 
-    public Connection(Configuration configuration, DesktopConnection desktopConnection) {
+    public Connection(Configuration configuration) {
         this.configuration = configuration;
-        this.desktopConnection = desktopConnection;
         this.defaultChannelName = String.format("%s:default", configuration.getPairingCode());
-        this.ofChannelName = String.format("webrtc:%s:offer:answer", this.configuration.getPairingCode());
         this.factory = new PeerConnectionFactory();
-        RTCConfiguration config = new RTCConfiguration();
-        this.peerConnection = factory.createPeerConnection(config, this);
         this.connectedLatch = new CountDownLatch(1);
         this.channelMap = new ConcurrentHashMap<>();
         this.connectionListeners = new CopyOnWriteArrayList<>();
-        logger.debug("Created Connection with default channel {} OF channel {}", this.defaultChannelName, this.ofChannelName);
+        logger.debug("Created Connection with default channel {}", this.defaultChannelName);
     }
 
-    // Only support OFFER for now
+    public void initialize() throws Exception {
+    }
+
+    protected void createPeerConnection(JSONObject rtcConfig) {
+        RTCConfiguration config = createRTCConfig(rtcConfig);
+        this.peerConnection = factory.createPeerConnection(config, this);
+    }
+
+    private RTCConfiguration createRTCConfig(JSONObject rtcConfig) {
+        RTCConfiguration config = new RTCConfiguration();
+        if (nonNull(rtcConfig)) {
+            List<RTCIceServer> iceServers = new ArrayList<>();
+            JSONArray array = rtcConfig.getJSONArray("iceServers");
+            for (int i = 0; i < array.length(); i++) {
+                RTCIceServer iceServer = new RTCIceServer();
+                JSONObject iceJson = array.getJSONObject(i);
+                JSONArray urls = iceJson.optJSONArray("urls");
+                if (nonNull(urls)) {
+                    for (Object url: urls) {
+                        iceServer.urls.add(url.toString());
+                    }
+                } else {
+                    iceServer.urls.add(iceJson.optString("urls"));
+                }
+                logger.debug("adding ice server: {}", iceServer);
+            }
+        }
+        return config;
+    }
+
     public void initializeOffer() throws Exception {
-        this.defaultDataChannel = this.peerConnection.createDataChannel(this.defaultChannelName, new RTCDataChannelInit());
+        logger.debug("Initialize offer {}", this.configuration.getPairingCode());
+        this.createDefaultChannel();
         this.createOffer();
+    }
+
+    public void initializeAnswer() throws Exception {
+        logger.debug("Initialize answer {}", this.configuration.getPairingCode());
+    }
+
+    private void createDefaultChannel() {
+        var defaultDataChannel = this.peerConnection.createDataChannel(this.defaultChannelName, new RTCDataChannelInit());
+        this.defaultChannel = new Channel(defaultDataChannel);
     }
 
     private void createOffer() throws Exception {
@@ -64,18 +97,18 @@ public class Connection implements PeerConnectionObserver {
         setObserver.get();
     }
 
-    private void makeOffer() {
+    protected JSONObject makeOffer() throws Exception {
         var offer = this.peerConnection.getLocalDescription();
         JSONObject description = new JSONObject();
-        description.put("type", "offer");
+        description.put("type", SDPOffer);
         description.put("sdp", offer.sdp);
         JSONObject payload = new JSONObject();
         payload.put("description", description);
         logger.debug("last ICE candidate {}", payload.toString());
-        this.ofChannelClient.dispatch(OFFER_ACTION, payload, null);
+        return payload;
     }
 
-    private RTCSessionDescription createAnswer() throws Exception {
+    protected RTCSessionDescription createAnswer() throws Exception {
         CreateDescObserver createObserver = new CreateDescObserver();
         SetDescObserver setObserver = new SetDescObserver();
         peerConnection.createAnswer(new RTCAnswerOptions(), createObserver);
@@ -85,12 +118,11 @@ public class Connection implements PeerConnectionObserver {
         return answerDesc;
     }
 
-    private JSONObject onAnswer(JSONObject payload) {
+    protected JSONObject onAnswer(JSONObject payload) {
         logger.debug("Got answer {}", payload.toString());
         JSONObject ret = new JSONObject();
         try {
-            JSONObject description = payload.getJSONObject("description");
-            this.setRemoteDescription(new RTCSessionDescription(RTCSdpType.ANSWER, description.getString("sdp")));
+            this.setRemoteDescription(new RTCSessionDescription(RTCSdpType.ANSWER, payload.getString("sdp")));
             ret.put("status", 200);
         } catch (Exception ex) {
             logger.error("Error setRemoteDescription", ex);
@@ -100,11 +132,24 @@ public class Connection implements PeerConnectionObserver {
         return ret;
     }
 
-    private void setRemoteDescription(RTCSessionDescription description) throws Exception {
+    protected JSONObject onOffer(JSONObject payload) {
+        return null;
+    }
+
+    protected void setRemoteDescription(RTCSessionDescription description) throws Exception {
         SetDescObserver setObserver = new SetDescObserver();
         peerConnection.setRemoteDescription(description, setObserver);
         setObserver.get();
     }
+
+    public void addIceCandidate(JSONObject payload) {
+        RTCIceCandidate candidate = new RTCIceCandidate(payload.getString("sdpMid"),
+                payload.getInt("sdpMLineIndex"),
+                payload.getString("candidate"),
+                payload.optString("serverUrl"));
+        peerConnection.addIceCandidate(candidate);
+    }
+
 
     public Channel createChannel(String name) {
         var dataChannel = this.peerConnection.createDataChannel(name, new RTCDataChannelInit());
@@ -119,11 +164,8 @@ public class Connection implements PeerConnectionObserver {
 
     public void close() {
         logger.debug("Closing {}", this.configuration.getPairingCode());
-        if (nonNull(this.defaultDataChannel)) {
-            this.defaultDataChannel.unregisterObserver();
-            this.defaultDataChannel.close();
-            this.defaultDataChannel.dispose();
-            this.defaultDataChannel = null;
+        if (nonNull(this.defaultChannel)) {
+            this.defaultChannel.close();
         }
         if (nonNull(this.peerConnection)) {
             this.peerConnection.close();
@@ -160,13 +202,14 @@ public class Connection implements PeerConnectionObserver {
     public void onIceGatheringChange(RTCIceGatheringState state) {
         logger.debug("onIceGatheringChange {}", state.toString());
         if (state == RTCIceGatheringState.COMPLETE) {
-            this.createOFChannelClient();
+            this.onLastIceCandidate();
         }
     }
 
     @Override
     public void onIceCandidate(RTCIceCandidate candidate) {
         logger.debug("onIceCandidate {}", candidate.toString());
+        this.onNewIceCandidate(candidate);
     }
 
     @Override
@@ -193,9 +236,11 @@ public class Connection implements PeerConnectionObserver {
     @Override
     public void onDataChannel(RTCDataChannel dataChannel) {
         logger.debug("onDataChannel {}", dataChannel.getLabel());
-        var channel = new Channel(dataChannel);
-        this.channelMap.put(dataChannel.getLabel(), channel);
-        this.fireChannelEvent(channel);
+        if (!this.defaultChannelName.equals(dataChannel.getLabel())) {
+            var channel = new Channel(dataChannel);
+            this.channelMap.put(dataChannel.getLabel(), channel);
+            this.fireChannelEvent(channel);
+        }
     }
 
     @Override
@@ -250,25 +295,10 @@ public class Connection implements PeerConnectionObserver {
         }
     }
 
-    private void createOFChannelClient() {
-        logger.debug("Connecting to OpenFin Channel {}", this.ofChannelName);
-        this.desktopConnection.getChannel(this.ofChannelName).connect(new AsyncCallback<ChannelClient>() {
-            @Override
-            public void onSuccess(ChannelClient client) {
-                logger.debug("Connected to OpenFin Channel {}", client.getName());
-                Connection.this.ofChannelClient = client;
-                client.register(ANSWER_ACTION, new ChannelAction() {
-                    @Override
-                    public JSONObject invoke(String s, JSONObject payload, JSONObject senderIdentity) {
-                        return Connection.this.onAnswer(payload);
-                    }
-                });
-                try {
-                    Connection.this.makeOffer();
-                } catch (Exception ex) {
-                    logger.error("Error creating offer", ex);
-                }
-            }
-        });
+    protected void onLastIceCandidate() {
     }
+
+    protected void onNewIceCandidate(RTCIceCandidate candidate) {
+    }
+
 }
