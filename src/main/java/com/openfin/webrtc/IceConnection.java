@@ -17,11 +17,13 @@ public class IceConnection extends Connection implements SignalingListener {
     private final static Logger logger = LoggerFactory.getLogger(IceConnection.class);
 
     private final Signaling signaling;
+    private boolean peerTrickleReady;
 
     public IceConnection(Configuration configuration) {
         super(configuration);
         this.signaling = new Signaling(configuration);
         this.signaling.setSignalingListener(this);
+        this.peerTrickleReady = false;
     }
 
     @Override
@@ -30,8 +32,16 @@ public class IceConnection extends Connection implements SignalingListener {
     }
 
     @Override
-    protected void createPeerConnection(JSONObject rtcConfig) {
+    protected void createPeerConnection(JSONObject rtcConfig) throws Exception {
         super.createPeerConnection(rtcConfig);
+        logger.debug("emit trickle ready {}", this.configuration.getPairingCode());
+        this.signaling.emit(Connection.SDPTrickleReady, this.configuration.getPairingCode());
+        if (this.peerTrickleReady) {
+            this.leaderOffer();
+        }
+    }
+
+    private void leaderOffer() {
         if (this.signaling.isPeerLeader()) {
             try {
                 this.initializeOffer();
@@ -91,7 +101,11 @@ public class IceConnection extends Connection implements SignalingListener {
 
     @Override
     public void onRtcConfig(JSONObject configuration) {
-        this.createPeerConnection(configuration);
+        try {
+            this.createPeerConnection(configuration);
+        } catch (Exception ex) {
+            logger.error("Error createPeerConnection", ex);
+        }
     }
 
     @Override
@@ -107,5 +121,15 @@ public class IceConnection extends Connection implements SignalingListener {
     @Override
     public void onSignalingIceCandidate(JSONObject candidate) {
         this.addIceCandidate(candidate);
+    }
+
+    @Override
+    public void onSignalingTrickleReady(String code) {
+        this.peerTrickleReady = true;
+        if (nonNull(this.peerConnection)) {
+            this.leaderOffer();
+        } else {
+            logger.info("signaling peerConnection not ready for trickle");
+        }
     }
 }

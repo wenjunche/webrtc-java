@@ -7,4 +7,5 @@ public interface SignalingListener {
     public void onSignalingOffer(JSONObject offer);
     public void onSignalingAnswer(JSONObject answer);
     public void onSignalingIceCandidate(JSONObject candidate);
+    public void onSignalingTrickleReady(String code);
 }

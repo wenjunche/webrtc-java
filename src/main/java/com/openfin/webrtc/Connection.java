@@ -26,6 +26,7 @@ public abstract class Connection implements PeerConnectionObserver {
     public static final String SDPAnswer = "answer";
     public static final String SDPOffer = "offer";
     public static final String SDPCandidate = "candidate";
+    public static final String SDPTrickleReady = "trickle";
 
     protected final Configuration configuration;
     private final PeerConnectionFactory factory;
@@ -48,7 +49,7 @@ public abstract class Connection implements PeerConnectionObserver {
 
     abstract public void initialize() throws Exception;
 
-    protected void createPeerConnection(JSONObject rtcConfig) {
+    protected void createPeerConnection(JSONObject rtcConfig) throws Exception {
         RTCConfiguration config = createRTCConfig(rtcConfig);
         this.peerConnection = factory.createPeerConnection(config, this);
     }
@@ -67,6 +68,12 @@ public abstract class Connection implements PeerConnectionObserver {
                     }
                 } else {
                     iceServer.urls.add(iceJson.optString("urls"));
+                }
+                if (iceJson.has("username")) {
+                    iceServer.username = iceJson.getString("username");
+                }
+                if (iceJson.has("credential")) {
+                    iceServer.password = iceJson.getString("credential");
                 }
                 config.iceServers.add(iceServer);
                 logger.debug("adding ice server: {}", iceServer);
@@ -187,7 +194,6 @@ public abstract class Connection implements PeerConnectionObserver {
         peerConnection.addIceCandidate(candidate);
     }
 
-
     public Channel createChannel(String name) {
         var dataChannel = this.peerConnection.createDataChannel(name, new RTCDataChannelInit());
         var channel = new Channel(dataChannel);
@@ -212,7 +218,6 @@ public abstract class Connection implements PeerConnectionObserver {
 
     @Override
     public void onSignalingChange(RTCSignalingState state) {
-
     }
 
     @Override

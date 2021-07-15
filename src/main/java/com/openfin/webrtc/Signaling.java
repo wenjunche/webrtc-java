@@ -108,6 +108,14 @@ public class Signaling {
             }
         });
 
+        this.socket.on(Connection.SDPTrickleReady, new Emitter.Listener() {
+            @Override
+            public void call(Object... objects) {
+                logger.info("peer trickle ready", objects[0]);
+                Signaling.this.signalingListener.onSignalingTrickleReady(objects[0].toString());
+            }
+        });
+
         this.socket.on("message", new Emitter.Listener() {
             @Override
             public void call(Object... objects) {
@@ -130,7 +138,7 @@ public class Signaling {
             var response = this.makeHTTPRequest(uri);
             logger.debug("Got {}", response.body());
             JSONObject config = new JSONObject(response.body());
-            this.signalingListener.onRtcConfig(config.getJSONObject("rtcConfig"));
+            this.signalingListener.onRtcConfig(config);
         } catch (Exception ex) {
             logger.error("Error creating WebRTC connection", ex);
         }
